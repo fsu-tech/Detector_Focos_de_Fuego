@@ -238,7 +238,11 @@ async function checkFires({ notify = true } = {}) {
       "\nSigue siempre las indicaciones del 112 y de las autoridades."
     );
   }
-  return { totalNearby: nearby.length, newFires: fresh.length, fires: nearby };
+  return {
+    totalNearby: nearby.length, newFires: fresh.length, fires: nearby,
+    location: { lat: config.lat, lon: config.lon }, radius: config.radius,
+    checkedAt: new Date().toISOString()
+  };
 }
 
 function json(res, status, body) {
@@ -291,7 +295,11 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "POST" && req.url === "/api/fires/check") {
       return json(res, 200, { ok: true, ...(await checkFires({ notify: false })) });
     }
-    if (req.method === "GET" && (req.url === "/" || req.url === "/mapa_focos_firms.html")) {
+    if (req.method === "GET" && (req.url === "/" || req.url === "/dashboard.html")) {
+      res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
+      return fs.createReadStream(path.join(ROOT, "dashboard.html")).pipe(res);
+    }
+    if (req.method === "GET" && req.url === "/mapa_focos_firms.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return fs.createReadStream(path.join(ROOT, "mapa_focos_firms.html")).pipe(res);
     }

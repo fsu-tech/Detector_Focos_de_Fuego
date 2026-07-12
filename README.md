@@ -1,0 +1,213 @@
+# FIRMS Watch
+
+Aplicación local para consultar focos térmicos detectados por satélite, mostrarlos en un mapa y recibir alertas de proximidad mediante Telegram.
+
+La aplicación toma datos de NASA FIRMS, combina las detecciones de varios satélites, calcula su distancia respecto a la ubicación configurada o compartida desde el móvil y avisa cuando existen focos dentro del radio establecido.
+
+> Una detección FIRMS es una anomalía térmica observada por satélite, no necesariamente un incendio confirmado.
+
+## URLs locales
+
+Mientras la aplicación no esté publicada en un servidor, primero hay que ejecutar:
+
+```powershell
+npm start
+```
+
+Después se pueden utilizar estas direcciones:
+
+### Dashboard principal
+
+```text
+http://localhost:3000
+```
+
+Es la dirección recomendada. Muestra:
+
+- Número de focos dentro del radio.
+- Distancia al foco más cercano.
+- Focos nuevos desde la última alerta.
+- Radio de vigilancia activo.
+- Ubicación GPS utilizada.
+- Focos dibujados en el mapa.
+- Detalles del foco más cercano.
+- Ruta orientativa en dirección opuesta.
+
+### Mapa sencillo anterior
+
+```text
+http://localhost:3000/mapa_focos_firms.html
+```
+
+Conserva una versión más sencilla del mapa, con un botón para cargar los focos actuales.
+
+### Live Server de VS Code
+
+Si se abre un archivo mediante **Open with Live Server**, las direcciones habituales son:
+
+```text
+http://127.0.0.1:5500/dashboard.html
+http://127.0.0.1:5500/mapa_focos_firms.html
+```
+
+Aunque se utilice Live Server, `npm start` debe permanecer ejecutándose. Live Server solo entrega el HTML; las consultas FIRMS y Telegram siguen dependiendo del servidor Node.js en:
+
+```text
+http://localhost:3000
+```
+
+## Puesta en marcha
+
+### 1. Requisitos
+
+- Node.js 18 o superior.
+- Una MAP_KEY de NASA FIRMS.
+- Un bot de Telegram.
+
+### 2. Configuración
+
+Crear un archivo `.env` en la raíz del proyecto:
+
+```env
+TELEGRAM_BOT_TOKEN=token_privado_del_bot
+TELEGRAM_CHAT_ID=
+FIRMS_MAP_KEY=map_key_privada_de_firms
+ALERT_LAT=37.2194
+ALERT_LON=-3.78306
+ALERT_RADIUS_KM=200
+CHECK_INTERVAL_MINUTES=15
+PORT=3000
+```
+
+`TELEGRAM_CHAT_ID` puede quedar vacío. La aplicación lo obtiene cuando se envía `/start` al bot.
+
+No se deben publicar ni compartir `.env`, el token de Telegram o la clave de FIRMS.
+
+### 3. Arranque
+
+```powershell
+npm start
+```
+
+La terminal debe permanecer abierta. Al cerrarla se detienen el servidor y las comprobaciones automáticas.
+
+## Cómo funciona
+
+### Consulta de satélites
+
+Cada 15 minutos el servidor consulta en paralelo estas fuentes de NASA FIRMS:
+
+- VIIRS S-NPP.
+- VIIRS NOAA-20.
+- VIIRS NOAA-21.
+- MODIS.
+
+Las respuestas llegan en formato CSV y se convierten en objetos JavaScript.
+
+### Eliminación de duplicados
+
+Dos observaciones se consideran el mismo foco cuando se encuentran aproximadamente a menos de 2 km y tienen una diferencia temporal máxima de una hora. De esta forma, una detección observada por varios satélites no se cuenta varias veces.
+
+### Distancia y radio
+
+La aplicación calcula la distancia entre la ubicación activa y cada foco. Solo conserva las detecciones situadas dentro de `ALERT_RADIUS_KM`, actualmente 200 km.
+
+Los focos se ordenan por distancia, por lo que el primer elemento es el más cercano.
+
+### Alertas de Telegram
+
+Si hay al menos un foco dentro del radio, el servidor envía una alerta cada 15 minutos con:
+
+- Número de focos cercanos.
+- Número de detecciones nuevas.
+- Distancia al foco más cercano.
+- Fecha y hora de adquisición.
+- Confianza.
+- Potencia radiativa FRP.
+- Fuentes satelitales.
+- Enlace a las coordenadas del foco.
+- Enlace a una ruta orientativa.
+
+Pulsar **Actualizar focos** en el dashboard solo actualiza el mapa. No envía una notificación adicional.
+
+## Ubicación GPS
+
+Al arrancar, el bot solicita una ubicación mediante el botón:
+
+```text
+📍 Compartir mi ubicación
+```
+
+Al pulsarlo desde Telegram:
+
+1. El móvil solicita permiso para acceder al GPS.
+2. Telegram envía las coordenadas al bot.
+3. El servidor guarda la ubicación.
+4. Las siguientes distancias y rutas utilizan esa posición.
+
+La última ubicación y el identificador del chat se guardan localmente en:
+
+```text
+current-location.json
+```
+
+Si no se comparte ninguna ubicación, se utilizan las coordenadas de respaldo configuradas en `.env`.
+
+## Ruta orientativa
+
+La aplicación calcula un punto situado 30 km desde la ubicación activa en dirección opuesta al foco más cercano. Después genera una URL de Google Maps para mostrar una ruta en coche hasta ese punto.
+
+Esta ruta:
+
+- No conoce el perímetro real del incendio.
+- No tiene en cuenta viento o humo.
+- No comprueba carreteras cortadas.
+- No sustituye las órdenes de evacuación.
+- No garantiza que el recorrido sea seguro.
+
+Ante una emergencia hay que seguir las instrucciones del **112** y de las autoridades.
+
+## Archivos principales
+
+```text
+dashboard.html              Dashboard principal
+mapa_focos_firms.html       Mapa sencillo
+server.js                   Servidor, FIRMS, Telegram y cálculos
+package.json                Configuración de Node.js
+.env                        Credenciales privadas, no incluido en Git
+current-location.json       Última ubicación GPS, no incluido en Git
+notified-fires.json         Registro de detecciones, no incluido en Git
+```
+
+## Datos privados
+
+El archivo `.gitignore` excluye:
+
+```text
+.env
+current-location.json
+notified-fires.json
+```
+
+Antes de publicar el repositorio conviene comprobar:
+
+```powershell
+git status
+git check-ignore .env current-location.json notified-fires.json
+```
+
+## Publicación futura
+
+Cuando se publique en un servidor, la dirección local:
+
+```text
+http://localhost:3000
+```
+
+se sustituirá por una URL HTTPS pública, por ejemplo:
+
+```text
+https://alertas.example.com
+```
+
+El alojamiento deberá mantener el proceso Node.js activo, proporcionar las variables de entorno privadas y utilizar almacenamiento persistente para la ubicación y el registro de focos.

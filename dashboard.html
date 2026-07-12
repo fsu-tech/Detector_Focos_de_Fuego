@@ -1,0 +1,376 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>FIRMS Watch — Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:wght@400;500;600;700&family=Space+Grotesk:wght@600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+  <style>
+    :root {
+      --bg: #f5f3ee;
+      --panel: #fffefa;
+      --ink: #16211c;
+      --muted: #6f7872;
+      --line: #dfded7;
+      --forest: #174d37;
+      --lime: #c9f05c;
+      --ember: #e55a32;
+      --gold: #efa93a;
+      --shadow: 0 18px 50px rgba(32, 45, 37, .09);
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-height: 100vh;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 0 0, rgba(201,240,92,.18), transparent 28rem),
+        var(--bg);
+      font-family: "DM Sans", sans-serif;
+    }
+    .shell { max-width: 1500px; margin: auto; padding: 24px; }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 20px;
+      margin-bottom: 22px;
+    }
+    .brand { display: flex; align-items: center; gap: 13px; }
+    .brand-mark {
+      display: grid;
+      place-items: center;
+      width: 46px;
+      height: 46px;
+      border-radius: 15px;
+      background: var(--forest);
+      color: var(--lime);
+      font-size: 22px;
+      box-shadow: var(--shadow);
+    }
+    h1, h2, .metric strong { font-family: "Space Grotesk", sans-serif; }
+    h1 { margin: 0; font-size: clamp(22px, 3vw, 31px); letter-spacing: -.04em; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-top: 3px; }
+    .actions { display: flex; align-items: center; gap: 12px; }
+    .status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+    .status-dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: #9ca59f;
+      box-shadow: 0 0 0 4px rgba(156,165,159,.15);
+    }
+    .status-dot.online { background: #37a66b; box-shadow: 0 0 0 4px rgba(55,166,107,.15); }
+    button {
+      border: 0;
+      border-radius: 12px;
+      padding: 12px 17px;
+      background: var(--forest);
+      color: white;
+      font: 700 14px "DM Sans", sans-serif;
+      cursor: pointer;
+      transition: transform .18s, opacity .18s;
+    }
+    button:hover { transform: translateY(-1px); }
+    button:disabled { opacity: .55; cursor: wait; transform: none; }
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 14px;
+      margin-bottom: 16px;
+    }
+    .metric {
+      position: relative;
+      overflow: hidden;
+      min-height: 116px;
+      padding: 18px;
+      border: 1px solid var(--line);
+      border-radius: 18px;
+      background: rgba(255,254,250,.88);
+      box-shadow: 0 8px 26px rgba(32,45,37,.045);
+    }
+    .metric::after {
+      content: "";
+      position: absolute;
+      width: 70px;
+      height: 70px;
+      right: -25px;
+      bottom: -30px;
+      border-radius: 50%;
+      background: var(--accent, var(--lime));
+      opacity: .18;
+    }
+    .metric span { color: var(--muted); font-size: 12px; font-weight: 600; text-transform: uppercase; letter-spacing: .08em; }
+    .metric strong { display: block; margin-top: 10px; font-size: 30px; letter-spacing: -.04em; }
+    .metric small { color: var(--muted); font-size: 12px; }
+    .workspace {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 330px;
+      gap: 16px;
+      min-height: 610px;
+    }
+    .map-card, .side-card {
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--panel);
+      box-shadow: var(--shadow);
+    }
+    .map-card { position: relative; overflow: hidden; min-height: 610px; }
+    #map { position: absolute; inset: 0; }
+    .map-badge {
+      position: absolute;
+      z-index: 500;
+      left: 16px;
+      bottom: 16px;
+      max-width: calc(100% - 32px);
+      padding: 10px 13px;
+      border: 1px solid rgba(255,255,255,.7);
+      border-radius: 12px;
+      background: rgba(255,254,250,.9);
+      backdrop-filter: blur(10px);
+      font-size: 12px;
+      box-shadow: 0 8px 26px rgba(0,0,0,.12);
+    }
+    .sidebar { display: flex; flex-direction: column; gap: 16px; }
+    .side-card { padding: 21px; }
+    .side-card h2 { margin: 0 0 18px; font-size: 18px; letter-spacing: -.03em; }
+    .fire-head { display: flex; align-items: center; gap: 12px; margin-bottom: 19px; }
+    .fire-icon {
+      display: grid;
+      place-items: center;
+      width: 44px;
+      height: 44px;
+      border-radius: 14px;
+      color: white;
+      background: var(--ember);
+      font-size: 20px;
+    }
+    .fire-head strong { display: block; }
+    .fire-head small { color: var(--muted); }
+    .detail { display: flex; justify-content: space-between; gap: 15px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
+    .detail span:first-child { color: var(--muted); }
+    .detail span:last-child { text-align: right; font-weight: 600; }
+    .route-link {
+      display: block;
+      margin-top: 17px;
+      padding: 12px;
+      border-radius: 12px;
+      text-align: center;
+      color: var(--forest);
+      background: var(--lime);
+      font-weight: 700;
+      font-size: 13px;
+      text-decoration: none;
+    }
+    .notice {
+      padding: 17px;
+      border-radius: 16px;
+      background: #fff5e5;
+      color: #76511b;
+      font-size: 12px;
+      line-height: 1.55;
+    }
+    .leaflet-control-attribution { font-size: 9px; }
+    .user-marker {
+      width: 18px;
+      height: 18px;
+      border: 4px solid white;
+      border-radius: 50%;
+      background: var(--forest);
+      box-shadow: 0 2px 10px rgba(0,0,0,.3);
+    }
+    @media (max-width: 900px) {
+      .metrics { grid-template-columns: repeat(2, 1fr); }
+      .workspace { grid-template-columns: 1fr; }
+      .map-card { min-height: 520px; }
+      .sidebar { display: grid; grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 620px) {
+      .shell { padding: 15px; }
+      header { align-items: flex-start; flex-direction: column; }
+      .actions { width: 100%; justify-content: space-between; }
+      .metrics { gap: 9px; }
+      .metric { min-height: 105px; padding: 15px; }
+      .metric strong { font-size: 25px; }
+      .map-card { min-height: 440px; }
+      .sidebar { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main class="shell">
+    <header>
+      <div class="brand">
+        <div class="brand-mark">◉</div>
+        <div>
+          <h1>FIRMS Watch</h1>
+          <div class="subtitle">Monitor de focos térmicos y alertas de proximidad</div>
+        </div>
+      </div>
+      <div class="actions">
+        <div class="status"><i id="statusDot" class="status-dot"></i><span id="statusText">Sin actualizar</span></div>
+        <button id="refresh">Actualizar focos</button>
+      </div>
+    </header>
+
+    <section class="metrics">
+      <article class="metric"><span>Focos cercanos</span><strong id="total">—</strong><small>dentro del radio</small></article>
+      <article class="metric" style="--accent:#e55a32"><span>Más cercano</span><strong id="nearest">—</strong><small>distancia aproximada</small></article>
+      <article class="metric" style="--accent:#efa93a"><span>Focos nuevos</span><strong id="newFires">—</strong><small>desde última alerta</small></article>
+      <article class="metric" style="--accent:#69a78b"><span>Radio activo</span><strong id="radius">—</strong><small>desde tu ubicación</small></article>
+    </section>
+
+    <section class="workspace">
+      <div class="map-card">
+        <div id="map"></div>
+        <div id="mapBadge" class="map-badge">Pulsa «Actualizar focos» para cargar los datos.</div>
+      </div>
+      <aside class="sidebar">
+        <article class="side-card">
+          <h2>Foco más cercano</h2>
+          <div id="emptyFire" class="notice">Todavía no se han cargado detecciones.</div>
+          <div id="fireDetails" hidden>
+            <div class="fire-head">
+              <div class="fire-icon">●</div>
+              <div><strong id="fireDistance">—</strong><small>desde tu ubicación</small></div>
+            </div>
+            <div class="detail"><span>Fecha y hora</span><span id="fireTime">—</span></div>
+            <div class="detail"><span>Confianza</span><span id="fireConfidence">—</span></div>
+            <div class="detail"><span>FRP</span><span id="fireFrp">—</span></div>
+            <div class="detail"><span>Fuentes</span><span id="fireSources">—</span></div>
+            <a id="routeLink" class="route-link" href="#" target="_blank" rel="noopener">Ver ruta orientativa ↗</a>
+          </div>
+        </article>
+        <div class="notice">
+          <strong>Información orientativa.</strong><br>
+          FIRMS detecta anomalías térmicas, no incendios confirmados. La ruta no considera humo, viento, cortes ni órdenes oficiales. Ante una emergencia, llama al 112.
+        </div>
+      </aside>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+          integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+  <script>
+    const API_BASE = location.port === "5500" ? "http://localhost:3000" : "";
+    const map = L.map("map", { zoomControl: false }).setView([37.2194, -3.78306], 7);
+    L.control.zoom({ position: "bottomright" }).addTo(map);
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19, attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+    const fireLayer = L.layerGroup().addTo(map);
+    const contextLayer = L.layerGroup().addTo(map);
+
+    function bearingDegrees(lat1, lon1, lat2, lon2) {
+      const rad = value => value * Math.PI / 180;
+      const y = Math.sin(rad(lon2 - lon1)) * Math.cos(rad(lat2));
+      const x = Math.cos(rad(lat1)) * Math.sin(rad(lat2)) -
+        Math.sin(rad(lat1)) * Math.cos(rad(lat2)) * Math.cos(rad(lon2 - lon1));
+      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+    function destinationPoint(lat, lon, bearing, distance) {
+      const rad = value => value * Math.PI / 180;
+      const d = distance / 6371, lat1 = rad(lat), lon1 = rad(lon), direction = rad(bearing);
+      const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) +
+        Math.cos(lat1) * Math.sin(d) * Math.cos(direction));
+      const lon2 = lon1 + Math.atan2(Math.sin(direction) * Math.sin(d) * Math.cos(lat1),
+        Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
+      return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+    }
+    function confidenceColor(value) {
+      const confidence = String(value || "").toLowerCase();
+      if (confidence === "h" || confidence === "high") return "#d9472d";
+      if (confidence === "l" || confidence === "low") return "#e9ba4a";
+      return "#ef7d3b";
+    }
+    function routeUrl(origin, destination) {
+      return "https://www.google.com/maps/dir/?api=1&origin=" +
+        encodeURIComponent(origin.join(",")) + "&destination=" +
+        encodeURIComponent(destination.join(",")) + "&travelmode=driving";
+    }
+    function setText(id, value) { document.getElementById(id).textContent = value; }
+
+    async function refreshDashboard() {
+      const button = document.getElementById("refresh");
+      button.disabled = true;
+      setText("statusText", "Consultando FIRMS…");
+      document.getElementById("statusDot").classList.remove("online");
+      try {
+        const response = await fetch(API_BASE + "/api/fires/check", { method: "POST" });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || "No se pudo actualizar");
+
+        const fires = data.fires || [];
+        const user = [Number(data.location.lat), Number(data.location.lon)];
+        const radius = Number(data.radius);
+        setText("total", fires.length);
+        setText("nearest", fires.length ? fires[0].distance.toFixed(1) + " km" : "Sin focos");
+        setText("newFires", data.newFires);
+        setText("radius", radius + " km");
+        setText("statusText", "Actualizado " + new Date(data.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
+        document.getElementById("statusDot").classList.add("online");
+        setText("mapBadge", fires.length + " detecciones evaluadas · " + radius + " km de radio");
+
+        fireLayer.clearLayers();
+        contextLayer.clearLayers();
+        const userIcon = L.divIcon({ className: "", html: '<div class="user-marker"></div>', iconSize: [18,18], iconAnchor: [9,9] });
+        L.marker(user, { icon: userIcon }).bindPopup("<strong>Tu ubicación activa</strong>").addTo(contextLayer);
+        L.circle(user, { radius: radius * 1000, color: "#174d37", weight: 1.5, fillColor: "#c9f05c", fillOpacity: .07 }).addTo(contextLayer);
+
+        const bounds = [user];
+        fires.forEach(function(fire) {
+          const point = [Number(fire.latitude), Number(fire.longitude)];
+          const marker = L.circleMarker(point, {
+            radius: Math.max(5, Math.min(13, 5 + Number(fire.frp || 0) / 9)),
+            color: "#8b2f1f", weight: 1, fillColor: confidenceColor(fire.confidence), fillOpacity: .84
+          });
+          marker.bindPopup("<strong>Foco térmico</strong><br>Distancia: " +
+            fire.distance.toFixed(1) + " km<br>FRP: " + (fire.frp || "—") + " MW");
+          marker.addTo(fireLayer);
+          bounds.push(point);
+        });
+
+        const details = document.getElementById("fireDetails");
+        const empty = document.getElementById("emptyFire");
+        if (fires.length) {
+          const fire = fires[0];
+          const point = [Number(fire.latitude), Number(fire.longitude)];
+          const away = bearingDegrees(point[0], point[1], user[0], user[1]);
+          const escape = destinationPoint(user[0], user[1], away, 30);
+          L.polyline([user, escape], { color: "#174d37", weight: 4, dashArray: "8 8", opacity: .85 }).addTo(contextLayer);
+          setText("fireDistance", fire.distance.toFixed(1) + " km");
+          setText("fireTime", (fire.acq_date || "—") + " · " + (fire.acq_time || "—") + " UTC");
+          setText("fireConfidence", fire.confidence || "—");
+          setText("fireFrp", (fire.frp || "—") + " MW");
+          setText("fireSources", (fire.sources || []).join(", ") || "—");
+          document.getElementById("routeLink").href = routeUrl(user, escape);
+          details.hidden = false;
+          empty.hidden = true;
+        } else {
+          details.hidden = true;
+          empty.hidden = false;
+          empty.textContent = "No se han encontrado focos dentro del radio actual.";
+        }
+        map.fitBounds(bounds, { padding: [35, 35], maxZoom: 9 });
+      } catch (error) {
+        setText("statusText", "Error de conexión");
+        setText("mapBadge", error.message + ". Comprueba que npm start está ejecutándose.");
+      } finally {
+        button.disabled = false;
+      }
+    }
+    document.getElementById("refresh").addEventListener("click", refreshDashboard);
+    refreshDashboard();
+  </script>
+</body>
+</html>
