@@ -1,0 +1,167 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Mapa de focos térmicos FIRMS — Península Ibérica</title>
+
+  <link rel="stylesheet"
+        href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY="
+        crossorigin="">
+
+  <style>
+    html, body { height: 100%; margin: 0; font-family: Arial, sans-serif; }
+    body { display: flex; flex-direction: column; background: #f4f5f7; }
+    .panel {
+      padding: 12px;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: end;
+      background: white;
+      box-shadow: 0 1px 5px rgba(0,0,0,.18);
+      z-index: 1000;
+    }
+    .campo { display: flex; flex-direction: column; gap: 4px; }
+    label { font-size: 13px; font-weight: 700; }
+    input, select, button {
+      box-sizing: border-box;
+      padding: 9px 10px;
+      border: 1px solid #bbb;
+      border-radius: 6px;
+      font-size: 14px;
+    }
+    input[type="password"] { width: 290px; }
+    button {
+      border: 0;
+      background: #b22222;
+      color: white;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    button:disabled { opacity: .6; cursor: wait; }
+    #estado { min-width: 220px; padding: 8px 0; font-size: 14px; }
+    #map { flex: 1; min-height: 400px; }
+    .leyenda {
+      background: white;
+      padding: 8px 10px;
+      line-height: 1.5;
+      border-radius: 6px;
+      box-shadow: 0 1px 5px rgba(0,0,0,.25);
+    }
+    .punto {
+      display: inline-block;
+      width: 11px;
+      height: 11px;
+      border-radius: 50%;
+      margin-right: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="panel">
+    <button id="cargarAlertas">Cargar focos actuales</button>
+    <div id="estado">Pulsa el botón para mostrar los focos incluidos en las alertas.</div>
+  </div>
+
+  <div id="map"></div>
+
+  <script
+    src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+    integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo="
+    crossorigin="">
+  </script>
+
+  <script>
+    const PENINSULA = "-10,35.5,4.8,44.2";
+    const API_BASE = location.port === "5500" ? "http://localhost:3000" : "";
+    const map = L.map("map").setView([40.1, -3.7], 6);
+
+    L.tileLayer("https://tile.openstreetmap.org/{z}/{x}/{y}.png", {
+      maxZoom: 19,
+      attribution: "&copy; OpenStreetMap"
+    }).addTo(map);
+
+    const capaFocos = L.layerGroup().addTo(map);
+
+    const leyenda = L.control({ position: "bottomright" });
+    leyenda.onAdd = () => {
+      const div = L.DomUtil.create("div", "leyenda");
+      div.innerHTML = `
+        <strong>Confianza</strong><br>
+        <span class="punto" style="background:#d7191c"></span>Alta<br>
+        <span class="punto" style="background:#fdae61"></span>Nominal<br>
+        <span class="punto" style="background:#ffffbf;border:1px solid #777"></span>Baja
+      `;
+      return div;
+    };
+    leyenda.addTo(map);
+
+    function parseCSV(texto) {
+      const lineas = texto.trim().split(/\r?\n/);
+      if (lineas.length < 2) return [];
+
+      const cabeceras = lineas[0].split(",").map(x => x.trim());
+
+      return lineas.slice(1).map(linea => {
+        const valores = linea.split(",");
+        const fila = {};
+        cabeceras.forEach((cabecera, i) => fila[cabecera] = valores[i]?.trim() ?? "");
+        return fila;
+      });
+    }
+
+    function colorConfianza(valor) {
+      const confianza = String(valor || "").toLowerCase();
+      if (confianza === "h" || confianza === "high") return "#d7191c";
+      if (confianza === "l" || confianza === "low") return "#ffffbf";
+      return "#fdae61";
+    }
+
+    function formatearHora(hora) {
+      const valor = String(hora || "").padStart(4, "0");
+      return `${valor.slice(0, 2)}:${valor.slice(2, 4)} UTC`;
+    }
+
+async function cargarAlertasActuales() {
+      const estado = document.getElementById("estado");
+      estado.textContent = "Cargando las mismas detecciones que Telegram…";
+      capaFocos.clearLayers();
+      try {
+        const respuesta = await fetch(API_BASE + "/api/fires/check", { method: "POST" });
+        const datos = await respuesta.json();
+        if (!respuesta.ok) throw new Error(datos.error || "No se pudieron cargar las alertas");
+        const limites = [];
+        for (const foco of datos.fires || []) {
+          const lat = Number(foco.latitude);
+          const lon = Number(foco.longitude);
+          if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+          const marcador = L.circleMarker([lat, lon], {
+            radius: Math.max(5, Math.min(14, 5 + Number(foco.frp || 0) / 8)),
+            color: "#7f0000", weight: 1,
+            fillColor: colorConfianza(foco.confidence), fillOpacity: 0.78
+          });
+          marcador.bindPopup(
+            "<strong>Foco incluido en las alertas</strong><br>" +
+            "Distancia: " + Number(foco.distance).toFixed(1) + " km<br>" +
+            "Fecha: " + (foco.acq_date || "—") + "<br>" +
+            "Hora: " + formatearHora(foco.acq_time) + "<br>" +
+            "Confianza: " + (foco.confidence || "—") + "<br>" +
+            "FRP: " + (foco.frp || "—") + " MW<br>" +
+            "Fuentes: " + ((foco.sources || []).join(", ") || "—")
+          );
+          marcador.addTo(capaFocos);
+          limites.push([lat, lon]);
+        }
+        if (limites.length) map.fitBounds(limites, { padding: [25, 25], maxZoom: 9 });
+        estado.textContent = limites.length + " focos actuales, iguales a los evaluados por Telegram.";
+      } catch (error) {
+        estado.textContent = "Error: " + error.message + ". Abre http://localhost:3000";
+      }
+    }
+
+    document.getElementById("cargarAlertas").addEventListener("click", cargarAlertasActuales);
+  </script>
+</body>
+</html>
