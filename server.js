@@ -5,6 +5,7 @@ const path = require("node:path");
 const ROOT = __dirname;
 const ENV_PATH = path.join(ROOT, ".env");
 const SEEN_PATH = path.join(ROOT, "notified-fires.json");
+const LOCATION_PATH = path.join(ROOT, "current-location.json");
 
 if (fs.existsSync(ENV_PATH)) {
   for (const raw of fs.readFileSync(ENV_PATH, "utf8").split(/\r?\n/)) {
@@ -30,6 +31,22 @@ const config = {
   port: Number(process.env.PORT || 3000)
 };
 
+try {
+  const savedLocation = JSON.parse(fs.readFileSync(LOCATION_PATH, "utf8"));
+  if (Number.isFinite(savedLocation.lat) && Number.isFinite(savedLocation.lon)) {
+    config.lat = savedLocation.lat;
+    config.lon = savedLocation.lon;
+  }
+  if (savedLocation.chatId) config.chatId = String(savedLocation.chatId);
+} catch {}
+
+function saveRuntimeState() {
+  fs.writeFileSync(LOCATION_PATH, JSON.stringify({
+    lat: config.lat, lon: config.lon, chatId: config.chatId,
+    updatedAt: new Date().toISOString()
+  }, null, 2));
+}
+
 function parseCSV(text) {
   const lines = text.trim().split(/\r?\n/);
   if (lines.length < 2) return [];
@@ -48,6 +65,29 @@ function distanceKm(lat1, lon1, lat2, lon2) {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
+function bearingDegrees(lat1, lon1, lat2, lon2) {
+  const rad = degrees => degrees * Math.PI / 180;
+  const y = Math.sin(rad(lon2 - lon1)) * Math.cos(rad(lat2));
+  const x = Math.cos(rad(lat1)) * Math.sin(rad(lat2)) -
+    Math.sin(rad(lat1)) * Math.cos(rad(lat2)) * Math.cos(rad(lon2 - lon1));
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+function destinationPoint(lat, lon, bearing, distance) {
+  const rad = degrees => degrees * Math.PI / 180;
+  const angularDistance = distance / 6371;
+  const lat1 = rad(lat);
+  const lon1 = rad(lon);
+  const direction = rad(bearing);
+  const lat2 = Math.asin(Math.sin(lat1) * Math.cos(angularDistance) +
+    Math.cos(lat1) * Math.sin(angularDistance) * Math.cos(direction));
+  const lon2 = lon1 + Math.atan2(
+    Math.sin(direction) * Math.sin(angularDistance) * Math.cos(lat1),
+    Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
+  );
+  return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
 async function telegram(method, body) {
   if (!config.token) throw new Error("Falta TELEGRAM_BOT_TOKEN en .env");
   const response = await fetch(`https://api.telegram.org/bot${config.token}/${method}`, {
@@ -63,12 +103,67 @@ async function discoverChatId() {
   const update = [...updates].reverse().find(x => x.message?.chat?.id);
   if (!update) throw new Error("No encuentro /start; envía otro mensaje al bot");
   config.chatId = String(update.message.chat.id);
+  saveRuntimeState();
   return config.chatId;
 }
 
 async function sendMessage(text) {
   if (!config.chatId) await discoverChatId();
   await telegram("sendMessage", { chat_id: config.chatId, text, disable_web_page_preview: true });
+}
+
+async function requestCurrentLocation() {
+  if (!config.chatId) await discoverChatId();
+  await telegram("sendMessage", {
+    chat_id: config.chatId,
+    text: "Pulsa el botón para usar la ubicación GPS actual en distancias y rutas.",
+    reply_markup: {
+      keyboard: [[{ text: "📍 Compartir mi ubicación", request_location: true }]],
+      resize_keyboard: true,
+      one_time_keyboard: true
+    }
+  });
+}
+
+let telegramUpdateOffset = 0;
+let pollingTelegram = false;
+async function pollTelegramLocations() {
+  if (pollingTelegram || !config.token) return;
+  pollingTelegram = true;
+  try {
+    const updates = await telegram("getUpdates", {
+      offset: telegramUpdateOffset || undefined,
+      limit: 100,
+      timeout: 0,
+      allowed_updates: ["message", "edited_message"]
+    });
+    for (const update of updates) {
+      telegramUpdateOffset = Math.max(telegramUpdateOffset, update.update_id + 1);
+      const message = update.edited_message || update.message;
+      if (!message?.chat?.id) continue;
+      if (!config.chatId) {
+        config.chatId = String(message.chat.id);
+        saveRuntimeState();
+      }
+      if (String(message.chat.id) !== String(config.chatId)) continue;
+      if (message.text === "/start") {
+        await requestCurrentLocation();
+        continue;
+      }
+      if (!message.location) continue;
+      config.lat = Number(message.location.latitude);
+      config.lon = Number(message.location.longitude);
+      saveRuntimeState();
+      await sendMessage(
+        "📍 Ubicación actualizada. A partir de ahora calcularé distancias y rutas desde este punto."
+      );
+      await runInitialCheck();
+    }
+  } catch (error) {
+    console.error("Actualización de ubicación fallida:", error.message);
+  } finally {
+    pollingTelegram = false;
+  }
 }
 
 function loadSeen() {
@@ -124,13 +219,23 @@ async function checkFires({ notify = true } = {}) {
 
   if (notify && nearby.length) {
     const fire = nearby[0];
+    const awayBearing = bearingDegrees(
+      Number(fire.latitude), Number(fire.longitude), config.lat, config.lon
+    );
+    const escapePoint = destinationPoint(config.lat, config.lon, awayBearing, 30);
+    const routeUrl = "https://www.google.com/maps/dir/?api=1&origin=" +
+      encodeURIComponent(config.lat + "," + config.lon) + "&destination=" +
+      encodeURIComponent(escapePoint[0].toFixed(6) + "," + escapePoint[1].toFixed(6)) +
+      "&travelmode=driving";
     await sendMessage(
-      "🔥 Alerta FIRMS: " + nearby.length + " foco(s) térmico(s) a menos de " + config.radius + " km de Fuente Vaqueros.\n" +
+      "🔥 Alerta FIRMS: " + nearby.length + " foco(s) térmico(s) a menos de " + config.radius + " km de tu ubicación.\n" +
       "Nuevos desde la última comprobación: " + fresh.length + "\n\n" +
       `Más cercano: ${fire.distance.toFixed(1)} km\nFecha/hora: ${fire.acq_date || "—"} ${fire.acq_time || "—"} UTC\n` +
       `Confianza: ${fire.confidence || "—"}\nFRP: ${fire.frp || "—"} MW\n` +
       "Fuentes: " + fire.sources.join(", ") + "\n" +
-      `https://www.google.com/maps?q=${fire.latitude},${fire.longitude}`
+      "Foco: https://www.google.com/maps?q=" + fire.latitude + "," + fire.longitude + "\n\n" +
+      "⚠️ Ruta orientativa alejándose del foco; NO es una evacuación oficial:\n" + routeUrl +
+      "\nSigue siempre las indicaciones del 112 y de las autoridades."
     );
   }
   return { totalNearby: nearby.length, newFires: fresh.length, fires: nearby };
@@ -180,7 +285,7 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { ok: true });
     }
     if (req.method === "POST" && req.url === "/api/telegram/test") {
-      await sendMessage(`✅ Prueba correcta. Alertas activas para Fuente Vaqueros en un radio de ${config.radius} km.`);
+      await sendMessage(`✅ Prueba correcta. Alertas activas para tu ubicación en un radio de ${config.radius} km.`);
       return json(res, 200, { ok: true });
     }
     if (req.method === "POST" && req.url === "/api/fires/check") {
@@ -198,6 +303,7 @@ const server = http.createServer(async (req, res) => {
 });
 
 let checking = false;
+let initialCheckStarted = false;
 async function scheduledCheck() {
   if (checking) return;
   checking = true;
@@ -206,9 +312,18 @@ async function scheduledCheck() {
   finally { checking = false; }
 }
 
+async function runInitialCheck() {
+  if (initialCheckStarted) return;
+  initialCheckStarted = true;
+  await scheduledCheck();
+}
+
 server.listen(config.port, () => {
   console.log(`Servidor disponible en http://localhost:${config.port}`);
-  console.log(`Fuente Vaqueros: radio ${config.radius} km, cada ${config.interval} min`);
-  setTimeout(scheduledCheck, 3000);
+  console.log("Ubicación activa: " + config.lat + ", " + config.lon + "; radio " + config.radius + " km, cada " + config.interval + " min");
+  setTimeout(() => requestCurrentLocation().catch(error => console.error(error.message)), 1000);
+  setTimeout(pollTelegramLocations, 5000);
+  setInterval(pollTelegramLocations, 10000);
+  setTimeout(runInitialCheck, 60000);
   setInterval(scheduledCheck, config.interval * 60 * 1000);
 });
