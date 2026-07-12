@@ -65,14 +65,6 @@ function distanceKm(lat1, lon1, lat2, lon2) {
   return 6371 * 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
 }
 
-function bearingDegrees(lat1, lon1, lat2, lon2) {
-  const rad = degrees => degrees * Math.PI / 180;
-  const y = Math.sin(rad(lon2 - lon1)) * Math.cos(rad(lat2));
-  const x = Math.cos(rad(lat1)) * Math.sin(rad(lat2)) -
-    Math.sin(rad(lat1)) * Math.cos(rad(lat2)) * Math.cos(rad(lon2 - lon1));
-  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-}
-
 function destinationPoint(lat, lon, bearing, distance) {
   const rad = degrees => degrees * Math.PI / 180;
   const angularDistance = distance / 6371;
@@ -86,6 +78,24 @@ function destinationPoint(lat, lon, bearing, distance) {
     Math.cos(angularDistance) - Math.sin(lat1) * Math.sin(lat2)
   );
   return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
+}
+
+function chooseEscapePlan(lat, lon, fires, distance = 30) {
+  let best = null;
+  for (let bearing = 0; bearing < 360; bearing += 15) {
+    const point = destinationPoint(lat, lon, bearing, distance);
+    let clearance = Infinity;
+    for (let sample = 1; sample <= 10; sample++) {
+      const routePoint = destinationPoint(lat, lon, bearing, distance * sample / 10);
+      for (const fire of fires) {
+        clearance = Math.min(clearance, distanceKm(
+          routePoint[0], routePoint[1], Number(fire.latitude), Number(fire.longitude)
+        ));
+      }
+    }
+    if (!best || clearance > best.clearance) best = { point, bearing, clearance };
+  }
+  return best;
 }
 
 async function telegram(method, body) {
@@ -217,15 +227,13 @@ async function checkFires({ notify = true } = {}) {
     if (fresh.length) fs.writeFileSync(SEEN_PATH, JSON.stringify([...seen].slice(-5000), null, 2));
   }
 
+  const escapePlan = nearby.length ? chooseEscapePlan(config.lat, config.lon, nearby) : null;
+
   if (notify && nearby.length) {
     const fire = nearby[0];
-    const awayBearing = bearingDegrees(
-      Number(fire.latitude), Number(fire.longitude), config.lat, config.lon
-    );
-    const escapePoint = destinationPoint(config.lat, config.lon, awayBearing, 30);
     const routeUrl = "https://www.google.com/maps/dir/?api=1&origin=" +
       encodeURIComponent(config.lat + "," + config.lon) + "&destination=" +
-      encodeURIComponent(escapePoint[0].toFixed(6) + "," + escapePoint[1].toFixed(6)) +
+      encodeURIComponent(escapePlan.point[0].toFixed(6) + "," + escapePlan.point[1].toFixed(6)) +
       "&travelmode=driving";
     await sendMessage(
       "🔥 Alerta FIRMS: " + nearby.length + " foco(s) térmico(s) a menos de " + config.radius + " km de tu ubicación.\n" +
@@ -234,14 +242,14 @@ async function checkFires({ notify = true } = {}) {
       `Confianza: ${fire.confidence || "—"}\nFRP: ${fire.frp || "—"} MW\n` +
       "Fuentes: " + fire.sources.join(", ") + "\n" +
       "Foco: https://www.google.com/maps?q=" + fire.latitude + "," + fire.longitude + "\n\n" +
-      "⚠️ Ruta orientativa alejándose del foco; NO es una evacuación oficial:\n" + routeUrl +
+      "⚠️ Ruta orientativa calculada respecto a todos los focos; NO es una evacuación oficial:\n" + routeUrl +
       "\nSigue siempre las indicaciones del 112 y de las autoridades."
     );
   }
   return {
     totalNearby: nearby.length, newFires: fresh.length, fires: nearby,
     location: { lat: config.lat, lon: config.lon }, radius: config.radius,
-    checkedAt: new Date().toISOString()
+    checkedAt: new Date().toISOString(), escapePlan
   };
 }
 

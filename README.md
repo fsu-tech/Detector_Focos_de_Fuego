@@ -31,7 +31,7 @@ Es la dirección recomendada. Muestra:
 - Ubicación GPS utilizada.
 - Focos dibujados en el mapa.
 - Detalles del foco más cercano.
-- Ruta orientativa en dirección opuesta.
+- Ruta orientativa evaluada respecto a todos los focos.
 
 ### Mapa sencillo anterior
 
@@ -155,13 +155,16 @@ Si no se comparte ninguna ubicación, se utilizan las coordenadas de respaldo co
 
 ## Ruta orientativa
 
-La aplicación calcula un punto situado 30 km desde la ubicación activa en dirección opuesta al foco más cercano. Después genera una URL de Google Maps para mostrar una ruta en coche hasta ese punto.
+La aplicación prueba 24 direcciones posibles, separadas por 15 grados. Para cada dirección proyecta un destino a 30 km, divide el recorrido recto en diez muestras y calcula su separación respecto a todos los focos detectados. Se elige la alternativa cuya distancia mínima a cualquier foco sea mayor.
+
+Después genera una URL de Google Maps para mostrar una ruta en coche hasta el destino elegido. El dashboard muestra también la separación mínima estimada.
 
 Esta ruta:
 
 - No conoce el perímetro real del incendio.
 - No tiene en cuenta viento o humo.
 - No comprueba carreteras cortadas.
+- Evalúa una línea recta, mientras Google Maps puede elegir un trazado de carretera diferente.
 - No sustituye las órdenes de evacuación.
 - No garantiza que el recorrido sea seguro.
 

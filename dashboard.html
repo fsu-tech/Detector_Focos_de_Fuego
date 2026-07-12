@@ -248,12 +248,13 @@
             <div class="detail"><span>Confianza</span><span id="fireConfidence">—</span></div>
             <div class="detail"><span>FRP</span><span id="fireFrp">—</span></div>
             <div class="detail"><span>Fuentes</span><span id="fireSources">—</span></div>
+            <div class="detail"><span>Separación estimada</span><span id="routeClearance">—</span></div>
             <a id="routeLink" class="route-link" href="#" target="_blank" rel="noopener">Ver ruta orientativa ↗</a>
           </div>
         </article>
         <div class="notice">
           <strong>Información orientativa.</strong><br>
-          FIRMS detecta anomalías térmicas, no incendios confirmados. La ruta no considera humo, viento, cortes ni órdenes oficiales. Ante una emergencia, llama al 112.
+          FIRMS detecta anomalías térmicas, no incendios confirmados. La ruta compara todos los focos, pero no considera humo, viento, cortes ni órdenes oficiales. Ante una emergencia, llama al 112.
         </div>
       </aside>
     </section>
@@ -271,22 +272,6 @@
     const fireLayer = L.layerGroup().addTo(map);
     const contextLayer = L.layerGroup().addTo(map);
 
-    function bearingDegrees(lat1, lon1, lat2, lon2) {
-      const rad = value => value * Math.PI / 180;
-      const y = Math.sin(rad(lon2 - lon1)) * Math.cos(rad(lat2));
-      const x = Math.cos(rad(lat1)) * Math.sin(rad(lat2)) -
-        Math.sin(rad(lat1)) * Math.cos(rad(lat2)) * Math.cos(rad(lon2 - lon1));
-      return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
-    }
-    function destinationPoint(lat, lon, bearing, distance) {
-      const rad = value => value * Math.PI / 180;
-      const d = distance / 6371, lat1 = rad(lat), lon1 = rad(lon), direction = rad(bearing);
-      const lat2 = Math.asin(Math.sin(lat1) * Math.cos(d) +
-        Math.cos(lat1) * Math.sin(d) * Math.cos(direction));
-      const lon2 = lon1 + Math.atan2(Math.sin(direction) * Math.sin(d) * Math.cos(lat1),
-        Math.cos(d) - Math.sin(lat1) * Math.sin(lat2));
-      return [lat2 * 180 / Math.PI, lon2 * 180 / Math.PI];
-    }
     function confidenceColor(value) {
       const confidence = String(value || "").toLowerCase();
       if (confidence === "h" || confidence === "high") return "#d9472d";
@@ -345,14 +330,14 @@
         if (fires.length) {
           const fire = fires[0];
           const point = [Number(fire.latitude), Number(fire.longitude)];
-          const away = bearingDegrees(point[0], point[1], user[0], user[1]);
-          const escape = destinationPoint(user[0], user[1], away, 30);
+          const escape = data.escapePlan.point;
           L.polyline([user, escape], { color: "#174d37", weight: 4, dashArray: "8 8", opacity: .85 }).addTo(contextLayer);
           setText("fireDistance", fire.distance.toFixed(1) + " km");
           setText("fireTime", (fire.acq_date || "—") + " · " + (fire.acq_time || "—") + " UTC");
           setText("fireConfidence", fire.confidence || "—");
           setText("fireFrp", (fire.frp || "—") + " MW");
           setText("fireSources", (fire.sources || []).join(", ") || "—");
+          setText("routeClearance", data.escapePlan.clearance.toFixed(1) + " km mínimos");
           document.getElementById("routeLink").href = routeUrl(user, escape);
           details.hidden = false;
           empty.hidden = true;
