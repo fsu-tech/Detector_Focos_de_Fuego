@@ -405,11 +405,15 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && requestUrl.pathname === "/api/earthquakes") {
       return json(res, 200, { ok: true, ...(await checkEarthquakes()) });
     }
-    if (req.method === "GET" && (req.url === "/" || req.url === "/dashboard.html")) {
+    if (req.method === "GET" && requestUrl.pathname === "/") {
+      res.writeHead(302, { "location": "/dashboard.html", "cache-control": "no-store" });
+      return res.end();
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/dashboard.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return fs.createReadStream(path.join(ROOT, "dashboard.html")).pipe(res);
     }
-    if (req.method === "GET" && req.url === "/mapa_focos_firms.html") {
+    if (req.method === "GET" && requestUrl.pathname === "/mapa_focos_firms.html") {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
       return fs.createReadStream(path.join(ROOT, "mapa_focos_firms.html")).pipe(res);
     }
