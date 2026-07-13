@@ -32,6 +32,7 @@ Es la dirección recomendada. Muestra:
 - Focos dibujados en el mapa.
 - Capa opcional de terremotos recientes en el mismo mapa.
 - Checkboxes independientes para mostrar u ocultar focos y terremotos.
+- Tarjetas y panel lateral dinámicos según la última capa activada.
 - Detalles del foco más cercano.
 - Ruta orientativa evaluada respecto a todos los focos.
 
@@ -122,19 +123,29 @@ distancia respecto a la ubicación activa, profundidad y fecha.
 
 El checkbox solo controla la capa del mapa; no activa sensores físicos ni predice terremotos.
 
+Al activar **Terremotos**, las tarjetas superiores pasan a mostrar el total nacional, los eventos
+dentro del radio, la mayor magnitud y el periodo consultado. El panel lateral muestra el terremoto
+más cercano. Al volver a activar **Focos de fuego**, se recuperan las métricas y el detalle FIRMS.
+Las dos capas pueden permanecer dibujadas simultáneamente; la última activada determina los datos
+mostrados por el dashboard.
+
 ### Eliminación de duplicados
 
 Dos observaciones se consideran el mismo foco cuando se encuentran aproximadamente a menos de 2 km y tienen una diferencia temporal máxima de una hora. De esta forma, una detección observada por varios satélites no se cuenta varias veces.
 
 ### Distancia y radio
 
-La aplicación calcula la distancia entre la ubicación activa y cada foco. Solo conserva las detecciones situadas dentro de `ALERT_RADIUS_KM`, actualmente 200 km.
+La aplicación calcula la distancia entre la ubicación activa y cada foco o terremoto. Solo conserva
+para alertas las detecciones situadas dentro de `ALERT_RADIUS_KM`, actualmente 200 km. La capa del
+mapa continúa mostrando terremotos de toda España, aunque estén fuera del radio de notificación.
 
 Los focos se ordenan por distancia, por lo que el primer elemento es el más cercano.
 
 ### Alertas de Telegram
 
-Si hay al menos un foco dentro del radio, el servidor envía una alerta cada 15 minutos con:
+Cada 15 minutos el servidor comprueba tanto los focos térmicos como los terremotos del IGN.
+
+Si hay al menos un foco dentro del radio, envía una alerta con:
 
 - Número de focos cercanos.
 - Número de detecciones nuevas.
@@ -146,7 +157,21 @@ Si hay al menos un foco dentro del radio, el servidor envía una alerta cada 15 
 - Enlace a las coordenadas del foco.
 - Enlace a una ruta orientativa.
 
-Pulsar **Actualizar focos** en el dashboard solo actualiza el mapa. No envía una notificación adicional.
+Cuando aparece un terremoto nuevo dentro del radio, envía una alerta con:
+
+- Número de terremotos nuevos cercanos.
+- Magnitud y localización del más cercano.
+- Distancia y profundidad.
+- Fecha y hora UTC.
+- Enlaces al epicentro y a la ficha oficial del IGN.
+
+Los identificadores ya notificados se guardan en `notified-earthquakes.json`, por lo que un mismo
+terremoto no genera mensajes repetidos. Si Telegram falla, el evento no se marca y se reintenta en
+la siguiente comprobación. En el primer arranque se envía un único resumen si ya existen terremotos
+dentro del radio; después solo se notifican los eventos nuevos.
+
+Pulsar **Actualizar datos** o activar el checkbox en el dashboard solo actualiza el mapa. No envía
+una notificación adicional.
 
 ## Ubicación GPS
 
@@ -198,6 +223,7 @@ package.json                Configuración de Node.js
 .env                        Credenciales privadas, no incluido en Git
 current-location.json       Última ubicación GPS, no incluido en Git
 notified-fires.json         Registro de detecciones, no incluido en Git
+notified-earthquakes.json   Registro de terremotos avisados, no incluido en Git
 ```
 
 ## Datos privados
@@ -208,13 +234,14 @@ El archivo `.gitignore` excluye:
 .env
 current-location.json
 notified-fires.json
+notified-earthquakes.json
 ```
 
 Antes de publicar el repositorio conviene comprobar:
 
 ```powershell
 git status
-git check-ignore .env current-location.json notified-fires.json
+git check-ignore .env current-location.json notified-fires.json notified-earthquakes.json
 ```
 
 ## Publicación futura
