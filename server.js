@@ -5,6 +5,7 @@ const path = require("node:path");
 const ROOT = __dirname;
 const ENV_PATH = path.join(ROOT, ".env");
 const SEEN_PATH = path.join(ROOT, "notified-fires.json");
+const EARTHQUAKE_SEEN_PATH = path.join(ROOT, "notified-earthquakes.json");
 const LOCATION_PATH = path.join(ROOT, "current-location.json");
 
 if (fs.existsSync(ENV_PATH)) {
@@ -178,9 +179,23 @@ async function pollTelegramLocations() {
   }
 }
 
-function loadSeen() {
-  try { return new Set(JSON.parse(fs.readFileSync(SEEN_PATH, "utf8"))); }
+function loadSeen(filePath = SEEN_PATH) {
+  try { return new Set(JSON.parse(fs.readFileSync(filePath, "utf8"))); }
   catch { return new Set(); }
+}
+
+function loadEarthquakeSeen() {
+  try {
+    const saved = JSON.parse(fs.readFileSync(EARTHQUAKE_SEEN_PATH, "utf8"));
+    return saved?.version === 1 && Array.isArray(saved.ids) ? new Set(saved.ids) : new Set();
+  } catch { return new Set(); }
+}
+
+function saveEarthquakeSeen(seen) {
+  fs.writeFileSync(EARTHQUAKE_SEEN_PATH, JSON.stringify({
+    version: 1,
+    ids: [...seen].slice(-5000)
+  }, null, 2));
 }
 
 async function checkFires({ notify = true } = {}) {
@@ -260,7 +275,7 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
-async function checkEarthquakes() {
+async function checkEarthquakes({ notify = false } = {}) {
   const ignUrl = "https://www.ign.es/web/ultimos-terremotos/-/ultimos-terremotos/get10dias";
   const response = await fetch(ignUrl, { headers: { "user-agent": "FIRMS-Watch/1.0" } });
   if (!response.ok) throw new Error("IGN respondió HTTP " + response.status);
@@ -306,11 +321,36 @@ async function checkEarthquakes() {
   const earthquakes = [...new Map(parsed.map(earthquake => [earthquake.id, earthquake])).values()]
     .filter(earthquake => earthquake.magnitude >= config.earthquakeMinMagnitude && Date.parse(earthquake.time) >= cutoff)
     .sort((a, b) => new Date(b.time) - new Date(a.time));
+  const nearby = earthquakes
+    .filter(earthquake => earthquake.distance <= config.radius)
+    .sort((a, b) => a.distance - b.distance);
+  const seen = loadEarthquakeSeen();
+  const fresh = nearby.filter(earthquake => !seen.has(earthquake.id));
+
+  if (notify && fresh.length) {
+    const earthquake = fresh[0];
+    const utcTime = new Date(earthquake.time).toISOString().slice(0, 16).replace("T", " ");
+    await sendMessage(
+      "🌍 Alerta sísmica IGN: " + fresh.length + " terremoto(s) nuevo(s) a menos de " + config.radius + " km de tu ubicación.\n\n" +
+      `Más cercano: magnitud ${earthquake.magnitude.toFixed(1)} · ${earthquake.place}\n` +
+      `Distancia: ${earthquake.distance.toFixed(1)} km\n` +
+      `Profundidad: ${earthquake.depth.toFixed(1)} km\n` +
+      `Fecha/hora: ${utcTime} UTC\n` +
+      "Epicentro: https://www.google.com/maps?q=" + earthquake.latitude + "," + earthquake.longitude + "\n" +
+      "Ficha IGN: " + earthquake.url + "\n\n" +
+      "Información automática. Sigue las indicaciones del 112 y de las autoridades si el terremoto se ha sentido."
+    );
+    fresh.forEach(earthquake => seen.add(earthquake.id));
+    saveEarthquakeSeen(seen);
+  }
 
   return {
     earthquakes,
-    totalNearby: earthquakes.length,
+    total: earthquakes.length,
+    totalNearby: nearby.length,
+    newEarthquakes: fresh.length,
     location: { lat: config.lat, lon: config.lon },
+    radius: config.radius,
     coverage: "España",
     source: "IGN",
     minMagnitude: config.earthquakeMinMagnitude,
@@ -389,6 +429,8 @@ async function scheduledCheck() {
   checking = true;
   try { console.log("Comprobación FIRMS:", await checkFires()); }
   catch (error) { console.error("Comprobación FIRMS fallida:", error.message); }
+  try { console.log("Comprobación IGN:", await checkEarthquakes({ notify: true })); }
+  catch (error) { console.error("Comprobación IGN fallida:", error.message); }
   finally { checking = false; }
 }
 

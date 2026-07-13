@@ -176,6 +176,7 @@
       background: var(--ember);
       font-size: 20px;
     }
+    .earthquake-icon { background: var(--quake); }
     .fire-head strong { display: block; }
     .fire-head small { color: var(--muted); }
     .detail { display: flex; justify-content: space-between; gap: 15px; padding: 11px 0; border-bottom: 1px solid var(--line); font-size: 13px; }
@@ -245,10 +246,10 @@
     </header>
 
     <section class="metrics">
-      <article class="metric"><span>Focos cercanos</span><strong id="total">—</strong><small>dentro del radio</small></article>
-      <article class="metric" style="--accent:#e55a32"><span>Más cercano</span><strong id="nearest">—</strong><small>distancia aproximada</small></article>
-      <article class="metric" style="--accent:#efa93a"><span>Focos nuevos</span><strong id="newFires">—</strong><small>desde última alerta</small></article>
-      <article class="metric" style="--accent:#69a78b"><span>Radio activo</span><strong id="radius">—</strong><small>desde tu ubicación</small></article>
+      <article class="metric"><span id="metricTotalLabel">Focos cercanos</span><strong id="total">—</strong><small id="metricTotalHint">dentro del radio</small></article>
+      <article class="metric" style="--accent:#e55a32"><span id="metricNearestLabel">Más cercano</span><strong id="nearest">—</strong><small id="metricNearestHint">distancia aproximada</small></article>
+      <article class="metric" style="--accent:#efa93a"><span id="metricThirdLabel">Focos nuevos</span><strong id="newFires">—</strong><small id="metricThirdHint">desde última alerta</small></article>
+      <article class="metric" style="--accent:#69a78b"><span id="metricFourthLabel">Radio activo</span><strong id="radius">—</strong><small id="metricFourthHint">desde tu ubicación</small></article>
     </section>
 
     <section class="workspace">
@@ -269,7 +270,7 @@
       </div>
       <aside class="sidebar">
         <article class="side-card">
-          <h2>Foco más cercano</h2>
+          <h2 id="detailTitle">Foco más cercano</h2>
           <div id="emptyFire" class="notice">Todavía no se han cargado detecciones.</div>
           <div id="fireDetails" hidden>
             <div class="fire-head">
@@ -282,6 +283,17 @@
             <div class="detail"><span>Fuentes</span><span id="fireSources">—</span></div>
             <div class="detail"><span>Separación estimada</span><span id="routeClearance">—</span></div>
             <a id="routeLink" class="route-link" href="#" target="_blank" rel="noopener">Ver ruta orientativa ↗</a>
+          </div>
+          <div id="earthquakeDetails" hidden>
+            <div class="fire-head">
+              <div class="fire-icon earthquake-icon">◉</div>
+              <div><strong id="earthquakeMagnitude">—</strong><small id="earthquakeDistance">desde tu ubicación</small></div>
+            </div>
+            <div class="detail"><span>Localización</span><span id="earthquakePlace">—</span></div>
+            <div class="detail"><span>Fecha y hora</span><span id="earthquakeTime">—</span></div>
+            <div class="detail"><span>Profundidad</span><span id="earthquakeDepth">—</span></div>
+            <div class="detail"><span>Fuente</span><span>IGN</span></div>
+            <a id="earthquakeLink" class="route-link" href="#" target="_blank" rel="noopener">Ver ficha oficial ↗</a>
           </div>
         </article>
         <div class="notice">
@@ -309,6 +321,10 @@
     let earthquakePoints = [];
     let earthquakeCount = 0;
     let earthquakesLoaded = false;
+    let fireRadius = 0;
+    let fireDashboardData = null;
+    let earthquakeDashboardData = null;
+    let dashboardMode = "fires";
 
     function confidenceColor(value) {
       const confidence = String(value || "").toLowerCase();
@@ -330,7 +346,7 @@
     function updateMapBadge() {
       const parts = [];
       if (document.getElementById("toggleFires").checked) {
-        parts.push(firePoints.length + " focos a " + document.getElementById("radius").textContent);
+        parts.push(firePoints.length + " focos a " + (fireRadius || "—") + " km");
       }
       if (document.getElementById("toggleEarthquakes").checked) {
         parts.push(earthquakeCount + " terremotos en España");
@@ -344,6 +360,92 @@
       map.fitBounds(points, { padding: [35, 35], maxZoom: 9 });
     }
 
+    function setMetricLabels(labels) {
+      setText("metricTotalLabel", labels[0][0]);
+      setText("metricTotalHint", labels[0][1]);
+      setText("metricNearestLabel", labels[1][0]);
+      setText("metricNearestHint", labels[1][1]);
+      setText("metricThirdLabel", labels[2][0]);
+      setText("metricThirdHint", labels[2][1]);
+      setText("metricFourthLabel", labels[3][0]);
+      setText("metricFourthHint", labels[3][1]);
+    }
+
+    function renderDashboardMode(mode) {
+      dashboardMode = mode;
+      const fireDetails = document.getElementById("fireDetails");
+      const earthquakeDetails = document.getElementById("earthquakeDetails");
+      const empty = document.getElementById("emptyFire");
+
+      if (mode === "earthquakes") {
+        setMetricLabels([
+          ["Terremotos", "en toda España"],
+          ["Dentro del radio", "a " + (earthquakeDashboardData?.radius || fireRadius || "—") + " km"],
+          ["Mayor magnitud", "de la ventana consultada"],
+          ["Periodo IGN", "actividad reciente"]
+        ]);
+        const earthquakes = earthquakeDashboardData?.earthquakes || [];
+        const radius = Number(earthquakeDashboardData?.radius || fireRadius);
+        const nearby = earthquakes.filter(earthquake => earthquake.distance <= radius);
+        const strongest = earthquakes.reduce((best, earthquake) =>
+          !best || earthquake.magnitude > best.magnitude ? earthquake : best, null);
+        const closest = earthquakes.reduce((best, earthquake) =>
+          !best || earthquake.distance < best.distance ? earthquake : best, null);
+        setText("total", earthquakesLoaded ? earthquakes.length : "—");
+        setText("nearest", earthquakesLoaded ? nearby.length : "—");
+        setText("newFires", strongest ? "M " + strongest.magnitude.toFixed(1) : "—");
+        setText("radius", earthquakeDashboardData ? earthquakeDashboardData.days + " días" : "—");
+        setText("detailTitle", "Terremoto más cercano");
+        fireDetails.hidden = true;
+        if (closest) {
+          setText("earthquakeMagnitude", "Magnitud " + closest.magnitude.toFixed(1));
+          setText("earthquakeDistance", closest.distance.toFixed(1) + " km desde tu ubicación");
+          setText("earthquakePlace", closest.place || "—");
+          setText("earthquakeTime", new Date(closest.time).toLocaleString([], { dateStyle: "short", timeStyle: "short" }));
+          setText("earthquakeDepth", closest.depth.toFixed(1) + " km");
+          document.getElementById("earthquakeLink").href = closest.url;
+          earthquakeDetails.hidden = false;
+          empty.hidden = true;
+        } else {
+          earthquakeDetails.hidden = true;
+          empty.hidden = false;
+          empty.textContent = earthquakesLoaded ? "No se han encontrado terremotos en el periodo actual." : "Cargando terremotos del IGN…";
+        }
+        return;
+      }
+
+      if (mode === "fires") {
+        setMetricLabels([
+          ["Focos cercanos", "dentro del radio"],
+          ["Más cercano", "distancia aproximada"],
+          ["Focos nuevos", "desde última alerta"],
+          ["Radio activo", "desde tu ubicación"]
+        ]);
+        const fires = fireDashboardData?.fires || [];
+        setText("total", fireDashboardData ? fires.length : "—");
+        setText("nearest", fireDashboardData ? (fires.length ? fires[0].distance.toFixed(1) + " km" : "Sin focos") : "—");
+        setText("newFires", fireDashboardData ? fireDashboardData.newFires : "—");
+        setText("radius", fireDashboardData ? fireDashboardData.radius + " km" : "—");
+        setText("detailTitle", "Foco más cercano");
+        earthquakeDetails.hidden = true;
+        fireDetails.hidden = !fires.length;
+        empty.hidden = Boolean(fires.length);
+        if (!fires.length) empty.textContent = fireDashboardData ? "No se han encontrado focos dentro del radio actual." : "Cargando focos de fuego…";
+        return;
+      }
+
+      setMetricLabels([
+        ["Detecciones", "sin capas activas"], ["Más cercano", "sin capas activas"],
+        ["Actividad", "sin capas activas"], ["Cobertura", "sin capas activas"]
+      ]);
+      ["total", "nearest", "newFires", "radius"].forEach(id => setText(id, "—"));
+      setText("detailTitle", "Detalles");
+      fireDetails.hidden = true;
+      earthquakeDetails.hidden = true;
+      empty.hidden = false;
+      empty.textContent = "Activa una capa para mostrar sus datos.";
+    }
+
     async function loadEarthquakes({ fit = true } = {}) {
       setText("earthquakeLayerCount", "cargando…");
       const response = await fetch(API_BASE + "/api/earthquakes");
@@ -351,6 +453,7 @@
       if (!response.ok) throw new Error(data.error || "No se pudieron cargar los terremotos");
 
       const earthquakes = data.earthquakes || [];
+      earthquakeDashboardData = data;
       earthquakeCount = earthquakes.length;
       earthquakesLoaded = true;
       earthquakePoints = [];
@@ -373,6 +476,7 @@
         marker.addTo(earthquakeLayer);
       });
       setText("earthquakeLayerCount", earthquakeCount);
+      if (dashboardMode === "earthquakes") renderDashboardMode("earthquakes");
       updateMapBadge();
       if (fit) fitVisibleLayers();
       return data;
@@ -391,12 +495,10 @@
         const fires = data.fires || [];
         const user = [Number(data.location.lat), Number(data.location.lon)];
         const radius = Number(data.radius);
+        fireDashboardData = data;
+        fireRadius = radius;
         userPoint = user;
         firePoints = [];
-        setText("total", fires.length);
-        setText("nearest", fires.length ? fires[0].distance.toFixed(1) + " km" : "Sin focos");
-        setText("newFires", data.newFires);
-        setText("radius", radius + " km");
         setText("statusText", "Actualizado " + new Date(data.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         document.getElementById("statusDot").classList.add("online");
         setText("fireLayerCount", fires.length);
@@ -443,6 +545,7 @@
         if (document.getElementById("toggleEarthquakes").checked) {
           await loadEarthquakes({ fit: false });
         }
+        renderDashboardMode(dashboardMode);
         updateMapBadge();
         fitVisibleLayers();
       } catch (error) {
@@ -453,8 +556,15 @@
       }
     }
     document.getElementById("toggleFires").addEventListener("change", function(event) {
-      if (event.target.checked) fireLayer.addTo(map);
-      else map.removeLayer(fireLayer);
+      if (event.target.checked) {
+        fireLayer.addTo(map);
+        renderDashboardMode("fires");
+      } else {
+        map.removeLayer(fireLayer);
+        if (dashboardMode === "fires") {
+          renderDashboardMode(document.getElementById("toggleEarthquakes").checked ? "earthquakes" : null);
+        }
+      }
       updateMapBadge();
       fitVisibleLayers();
     });
@@ -462,11 +572,15 @@
       if (!event.target.checked) {
         if (map.hasLayer(earthquakeLayer)) map.removeLayer(earthquakeLayer);
         setText("earthquakeLayerCount", earthquakeCount || "desactivado");
+        if (dashboardMode === "earthquakes") {
+          renderDashboardMode(document.getElementById("toggleFires").checked ? "fires" : null);
+        }
         updateMapBadge();
         fitVisibleLayers();
         return;
       }
       earthquakeLayer.addTo(map);
+      renderDashboardMode("earthquakes");
       if (earthquakesLoaded) {
         updateMapBadge();
         fitVisibleLayers();
@@ -481,6 +595,7 @@
         earthquakesLoaded = false;
         event.target.checked = false;
         map.removeLayer(earthquakeLayer);
+        renderDashboardMode(document.getElementById("toggleFires").checked ? "fires" : null);
         setText("earthquakeLayerCount", "error");
         setText("statusText", "Error al consultar IGN");
         setText("mapBadge", error.message + ". Comprueba que npm start está ejecutándose.");
