@@ -19,6 +19,7 @@
       --forest: #174d37;
       --lime: #c9f05c;
       --ember: #e55a32;
+      --quake: #6657c7;
       --gold: #efa93a;
       --shadow: 0 18px 50px rgba(32, 45, 37, .09);
     }
@@ -141,6 +142,26 @@
       font-size: 12px;
       box-shadow: 0 8px 26px rgba(0,0,0,.12);
     }
+    .layer-controls {
+      position: absolute;
+      z-index: 500;
+      top: 16px;
+      left: 16px;
+      display: grid;
+      gap: 8px;
+      min-width: 205px;
+      padding: 12px;
+      border: 1px solid rgba(255,255,255,.75);
+      border-radius: 14px;
+      background: rgba(255,254,250,.92);
+      backdrop-filter: blur(10px);
+      box-shadow: 0 8px 26px rgba(0,0,0,.12);
+    }
+    .layer-controls strong { margin-bottom: 2px; font-size: 12px; text-transform: uppercase; letter-spacing: .08em; }
+    .layer-option { display: flex; align-items: center; gap: 9px; cursor: pointer; font-size: 13px; font-weight: 600; }
+    .layer-option input { width: 17px; height: 17px; margin: 0; accent-color: var(--forest); cursor: pointer; }
+    .layer-option[data-layer="earthquakes"] input { accent-color: var(--quake); }
+    .layer-count { margin-left: auto; color: var(--muted); font-size: 11px; font-weight: 500; }
     .sidebar { display: flex; flex-direction: column; gap: 16px; }
     .side-card { padding: 21px; }
     .side-card h2 { margin: 0 0 18px; font-size: 18px; letter-spacing: -.03em; }
@@ -214,12 +235,12 @@
         <div class="brand-mark">◉</div>
         <div>
           <h1>FIRMS Watch</h1>
-          <div class="subtitle">Monitor de focos térmicos y alertas de proximidad</div>
+          <div class="subtitle">Monitor de focos térmicos, terremotos y alertas de proximidad</div>
         </div>
       </div>
       <div class="actions">
         <div class="status"><i id="statusDot" class="status-dot"></i><span id="statusText">Sin actualizar</span></div>
-        <button id="refresh">Actualizar focos</button>
+        <button id="refresh">Actualizar datos</button>
       </div>
     </header>
 
@@ -233,7 +254,18 @@
     <section class="workspace">
       <div class="map-card">
         <div id="map"></div>
-        <div id="mapBadge" class="map-badge">Pulsa «Actualizar focos» para cargar los datos.</div>
+        <div class="layer-controls" aria-label="Capas del mapa">
+          <strong>Capas activas</strong>
+          <label class="layer-option" data-layer="fires">
+            <input id="toggleFires" type="checkbox" checked>
+            <span>🔥 Focos de fuego</span><span id="fireLayerCount" class="layer-count">—</span>
+          </label>
+          <label class="layer-option" data-layer="earthquakes">
+            <input id="toggleEarthquakes" type="checkbox">
+            <span>◉ Terremotos · España</span><span id="earthquakeLayerCount" class="layer-count">desactivado</span>
+          </label>
+        </div>
+        <div id="mapBadge" class="map-badge">Cargando los focos de fuego…</div>
       </div>
       <aside class="sidebar">
         <article class="side-card">
@@ -254,7 +286,7 @@
         </article>
         <div class="notice">
           <strong>Información orientativa.</strong><br>
-          FIRMS detecta anomalías térmicas, no incendios confirmados. La ruta compara todos los focos, pero no considera humo, viento, cortes ni órdenes oficiales. Ante una emergencia, llama al 112.
+          FIRMS detecta anomalías térmicas, no incendios confirmados. Los terremotos proceden del Instituto Geográfico Nacional. La ruta compara todos los focos, pero no considera humo, viento, cortes ni órdenes oficiales. Ante una emergencia, llama al 112.
         </div>
       </aside>
     </section>
@@ -270,7 +302,13 @@
       maxZoom: 19, attribution: "&copy; OpenStreetMap"
     }).addTo(map);
     const fireLayer = L.layerGroup().addTo(map);
+    const earthquakeLayer = L.layerGroup();
     const contextLayer = L.layerGroup().addTo(map);
+    let userPoint = [37.2194, -3.78306];
+    let firePoints = [];
+    let earthquakePoints = [];
+    let earthquakeCount = 0;
+    let earthquakesLoaded = false;
 
     function confidenceColor(value) {
       const confidence = String(value || "").toLowerCase();
@@ -284,11 +322,66 @@
         encodeURIComponent(destination.join(",")) + "&travelmode=driving";
     }
     function setText(id, value) { document.getElementById(id).textContent = value; }
+    function escapeHtml(value) {
+      return String(value ?? "").replace(/[&<>"]/g, character => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;"
+      })[character]);
+    }
+    function updateMapBadge() {
+      const parts = [];
+      if (document.getElementById("toggleFires").checked) {
+        parts.push(firePoints.length + " focos a " + document.getElementById("radius").textContent);
+      }
+      if (document.getElementById("toggleEarthquakes").checked) {
+        parts.push(earthquakeCount + " terremotos en España");
+      }
+      setText("mapBadge", parts.length ? parts.join(" · ") : "No hay capas de detecciones activas");
+    }
+    function fitVisibleLayers() {
+      const points = [userPoint];
+      if (document.getElementById("toggleFires").checked) points.push(...firePoints);
+      if (document.getElementById("toggleEarthquakes").checked) points.push(...earthquakePoints);
+      map.fitBounds(points, { padding: [35, 35], maxZoom: 9 });
+    }
+
+    async function loadEarthquakes({ fit = true } = {}) {
+      setText("earthquakeLayerCount", "cargando…");
+      const response = await fetch(API_BASE + "/api/earthquakes");
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || "No se pudieron cargar los terremotos");
+
+      const earthquakes = data.earthquakes || [];
+      earthquakeCount = earthquakes.length;
+      earthquakesLoaded = true;
+      earthquakePoints = [];
+      earthquakeLayer.clearLayers();
+      earthquakes.forEach(function(earthquake) {
+        const point = [Number(earthquake.latitude), Number(earthquake.longitude)];
+        earthquakePoints.push(point);
+        const marker = L.circleMarker(point, {
+          radius: Math.max(5, Math.min(18, 4 + Number(earthquake.magnitude) * 2)),
+          color: "#342b83", weight: 1.5, fillColor: "#7768dc", fillOpacity: .76
+        });
+        const localTime = new Date(earthquake.time).toLocaleString([], {
+          dateStyle: "short", timeStyle: "short"
+        });
+        marker.bindPopup(
+          "<strong>Terremoto M " + earthquake.magnitude.toFixed(1) + "</strong><br>" +
+          escapeHtml(earthquake.place) + "<br>Distancia: " + earthquake.distance.toFixed(1) +
+          " km<br>Profundidad: " + earthquake.depth.toFixed(1) + " km<br>Fecha: " + localTime
+        );
+        marker.addTo(earthquakeLayer);
+      });
+      setText("earthquakeLayerCount", earthquakeCount);
+      updateMapBadge();
+      if (fit) fitVisibleLayers();
+      return data;
+    }
 
     async function refreshDashboard() {
       const button = document.getElementById("refresh");
       button.disabled = true;
-      setText("statusText", "Consultando FIRMS…");
+      setText("statusText", "Consultando datos…");
       document.getElementById("statusDot").classList.remove("online");
       try {
         const response = await fetch(API_BASE + "/api/fires/check", { method: "POST" });
@@ -298,13 +391,15 @@
         const fires = data.fires || [];
         const user = [Number(data.location.lat), Number(data.location.lon)];
         const radius = Number(data.radius);
+        userPoint = user;
+        firePoints = [];
         setText("total", fires.length);
         setText("nearest", fires.length ? fires[0].distance.toFixed(1) + " km" : "Sin focos");
         setText("newFires", data.newFires);
         setText("radius", radius + " km");
         setText("statusText", "Actualizado " + new Date(data.checkedAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }));
         document.getElementById("statusDot").classList.add("online");
-        setText("mapBadge", fires.length + " detecciones evaluadas · " + radius + " km de radio");
+        setText("fireLayerCount", fires.length);
 
         fireLayer.clearLayers();
         contextLayer.clearLayers();
@@ -312,7 +407,6 @@
         L.marker(user, { icon: userIcon }).bindPopup("<strong>Tu ubicación activa</strong>").addTo(contextLayer);
         L.circle(user, { radius: radius * 1000, color: "#174d37", weight: 1.5, fillColor: "#c9f05c", fillOpacity: .07 }).addTo(contextLayer);
 
-        const bounds = [user];
         fires.forEach(function(fire) {
           const point = [Number(fire.latitude), Number(fire.longitude)];
           const marker = L.circleMarker(point, {
@@ -322,7 +416,7 @@
           marker.bindPopup("<strong>Foco térmico</strong><br>Distancia: " +
             fire.distance.toFixed(1) + " km<br>FRP: " + (fire.frp || "—") + " MW");
           marker.addTo(fireLayer);
-          bounds.push(point);
+          firePoints.push(point);
         });
 
         const details = document.getElementById("fireDetails");
@@ -331,7 +425,7 @@
           const fire = fires[0];
           const point = [Number(fire.latitude), Number(fire.longitude)];
           const escape = data.escapePlan.point;
-          L.polyline([user, escape], { color: "#174d37", weight: 4, dashArray: "8 8", opacity: .85 }).addTo(contextLayer);
+          L.polyline([user, escape], { color: "#174d37", weight: 4, dashArray: "8 8", opacity: .85 }).addTo(fireLayer);
           setText("fireDistance", fire.distance.toFixed(1) + " km");
           setText("fireTime", (fire.acq_date || "—") + " · " + (fire.acq_time || "—") + " UTC");
           setText("fireConfidence", fire.confidence || "—");
@@ -346,7 +440,11 @@
           empty.hidden = false;
           empty.textContent = "No se han encontrado focos dentro del radio actual.";
         }
-        map.fitBounds(bounds, { padding: [35, 35], maxZoom: 9 });
+        if (document.getElementById("toggleEarthquakes").checked) {
+          await loadEarthquakes({ fit: false });
+        }
+        updateMapBadge();
+        fitVisibleLayers();
       } catch (error) {
         setText("statusText", "Error de conexión");
         setText("mapBadge", error.message + ". Comprueba que npm start está ejecutándose.");
@@ -354,6 +452,40 @@
         button.disabled = false;
       }
     }
+    document.getElementById("toggleFires").addEventListener("change", function(event) {
+      if (event.target.checked) fireLayer.addTo(map);
+      else map.removeLayer(fireLayer);
+      updateMapBadge();
+      fitVisibleLayers();
+    });
+    document.getElementById("toggleEarthquakes").addEventListener("change", async function(event) {
+      if (!event.target.checked) {
+        if (map.hasLayer(earthquakeLayer)) map.removeLayer(earthquakeLayer);
+        setText("earthquakeLayerCount", earthquakeCount || "desactivado");
+        updateMapBadge();
+        fitVisibleLayers();
+        return;
+      }
+      earthquakeLayer.addTo(map);
+      if (earthquakesLoaded) {
+        updateMapBadge();
+        fitVisibleLayers();
+        return;
+      }
+      try {
+        setText("statusText", "Consultando IGN…");
+        await loadEarthquakes();
+        setText("statusText", "Terremotos actualizados");
+        document.getElementById("statusDot").classList.add("online");
+      } catch (error) {
+        earthquakesLoaded = false;
+        event.target.checked = false;
+        map.removeLayer(earthquakeLayer);
+        setText("earthquakeLayerCount", "error");
+        setText("statusText", "Error al consultar IGN");
+        setText("mapBadge", error.message + ". Comprueba que npm start está ejecutándose.");
+      }
+    });
     document.getElementById("refresh").addEventListener("click", refreshDashboard);
     refreshDashboard();
   </script>
