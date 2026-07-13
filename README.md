@@ -145,7 +145,7 @@ Los focos se ordenan por distancia, por lo que el primer elemento es el más cer
 
 Cada 15 minutos el servidor comprueba tanto los focos térmicos como los terremotos del IGN.
 
-Si hay al menos un foco dentro del radio, envía una alerta con:
+Si aparece al menos un foco nuevo dentro del radio, envía una alerta con:
 
 - Número de focos cercanos.
 - Número de detecciones nuevas.
@@ -156,6 +156,10 @@ Si hay al menos un foco dentro del radio, envía una alerta con:
 - Fuentes satelitales.
 - Enlace a las coordenadas del foco.
 - Enlace a una ruta orientativa.
+
+Los focos que ya figuran en `notified-fires.json` continúan visibles en el dashboard, pero no vuelven
+a generar mensajes. Si Telegram falla, las detecciones nuevas no se marcan como notificadas y se
+reintentan en la siguiente comprobación.
 
 Cuando aparece un terremoto nuevo dentro del radio, envía una alerta con:
 

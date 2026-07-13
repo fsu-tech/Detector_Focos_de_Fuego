@@ -239,15 +239,11 @@ async function checkFires({ notify = true } = {}) {
   const seen = loadSeen();
   const id = fire => [fire.latitude, fire.longitude, fire.acq_date, fire.acq_time, fire.satellite].join("|");
   const fresh = nearby.filter(fire => !seen.has(id(fire)));
-  if (notify) {
-    fresh.forEach(fire => seen.add(id(fire)));
-    if (fresh.length) fs.writeFileSync(SEEN_PATH, JSON.stringify([...seen].slice(-5000), null, 2));
-  }
 
   const escapePlan = nearby.length ? chooseEscapePlan(config.lat, config.lon, nearby) : null;
 
-  if (notify && nearby.length) {
-    const fire = nearby[0];
+  if (notify && fresh.length) {
+    const fire = fresh[0];
     const routeUrl = "https://www.google.com/maps/dir/?api=1&origin=" +
       encodeURIComponent(config.lat + "," + config.lon) + "&destination=" +
       encodeURIComponent(escapePlan.point[0].toFixed(6) + "," + escapePlan.point[1].toFixed(6)) +
@@ -255,13 +251,15 @@ async function checkFires({ notify = true } = {}) {
     await sendMessage(
       "🔥 Alerta FIRMS: " + nearby.length + " foco(s) térmico(s) a menos de " + config.radius + " km de tu ubicación.\n" +
       "Nuevos desde la última comprobación: " + fresh.length + "\n\n" +
-      `Más cercano: ${fire.distance.toFixed(1)} km\nFecha/hora: ${fire.acq_date || "—"} ${fire.acq_time || "—"} UTC\n` +
+      `Nuevo más cercano: ${fire.distance.toFixed(1)} km\nFecha/hora: ${fire.acq_date || "—"} ${fire.acq_time || "—"} UTC\n` +
       `Confianza: ${fire.confidence || "—"}\nFRP: ${fire.frp || "—"} MW\n` +
       "Fuentes: " + fire.sources.join(", ") + "\n" +
       "Foco: https://www.google.com/maps?q=" + fire.latitude + "," + fire.longitude + "\n\n" +
       "⚠️ Ruta orientativa calculada respecto a todos los focos; NO es una evacuación oficial:\n" + routeUrl +
       "\nSigue siempre las indicaciones del 112 y de las autoridades."
     );
+    fresh.forEach(fire => seen.add(id(fire)));
+    fs.writeFileSync(SEEN_PATH, JSON.stringify([...seen].slice(-5000), null, 2));
   }
   return {
     totalNearby: nearby.length, newFires: fresh.length, fires: nearby,
