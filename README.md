@@ -30,6 +30,8 @@ Es la dirección recomendada. Muestra:
 - Radio de vigilancia activo.
 - Ubicación GPS utilizada.
 - Focos dibujados en el mapa.
+- Capa opcional de terremotos recientes en el mismo mapa.
+- Checkboxes independientes para mostrar u ocultar focos y terremotos.
 - Detalles del foco más cercano.
 - Ruta orientativa evaluada respecto a todos los focos.
 
@@ -75,6 +77,8 @@ FIRMS_MAP_KEY=map_key_privada_de_firms
 ALERT_LAT=37.2194
 ALERT_LON=-3.78306
 ALERT_RADIUS_KM=200
+EARTHQUAKE_MIN_MAGNITUDE=1.5
+EARTHQUAKE_DAYS=7
 CHECK_INTERVAL_MINUTES=15
 PORT=3000
 ```
@@ -82,6 +86,11 @@ PORT=3000
 `TELEGRAM_CHAT_ID` puede quedar vacío. La aplicación lo obtiene cuando se envía `/start` al bot.
 
 No se deben publicar ni compartir `.env`, el token de Telegram o la clave de FIRMS.
+
+Los terremotos se consultan en la información sísmica pública del IGN y no necesitan API key. Las variables
+`EARTHQUAKE_MIN_MAGNITUDE` y `EARTHQUAKE_DAYS` son opcionales; sus valores predeterminados son
+1.5 y 7 días. `ALERT_RADIUS_KM` solo limita los focos de fuego; la capa de terremotos cubre toda
+España, incluidas Península, Baleares, Canarias, Ceuta y Melilla.
 
 ### 3. Arranque
 
@@ -103,6 +112,15 @@ Cada 15 minutos el servidor consulta en paralelo estas fuentes de NASA FIRMS:
 - MODIS.
 
 Las respuestas llegan en formato CSV y se convierten en objetos JavaScript.
+
+### Consulta de terremotos
+
+Al activar el checkbox **Terremotos**, el dashboard solicita al backend los eventos recientes del
+Instituto Geográfico Nacional. El servidor filtra por la magnitud mínima y la ventana temporal configurada. La
+consulta cubre toda España y cada marcador muestra magnitud, lugar,
+distancia respecto a la ubicación activa, profundidad y fecha.
+
+El checkbox solo controla la capa del mapa; no activa sensores físicos ni predice terremotos.
 
 ### Eliminación de duplicados
 
@@ -175,7 +193,7 @@ Ante una emergencia hay que seguir las instrucciones del **112** y de las autori
 ```text
 dashboard.html              Dashboard principal
 mapa_focos_firms.html       Mapa sencillo
-server.js                   Servidor, FIRMS, Telegram y cálculos
+server.js                   Servidor, FIRMS, IGN, Telegram y cálculos
 package.json                Configuración de Node.js
 .env                        Credenciales privadas, no incluido en Git
 current-location.json       Última ubicación GPS, no incluido en Git

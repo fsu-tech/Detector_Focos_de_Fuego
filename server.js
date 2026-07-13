@@ -27,6 +27,8 @@ const config = {
   lat: Number(process.env.ALERT_LAT || 37.2194),
   lon: Number(process.env.ALERT_LON || -3.78306),
   radius: Number(process.env.ALERT_RADIUS_KM || 500),
+  earthquakeMinMagnitude: Number(process.env.EARTHQUAKE_MIN_MAGNITUDE || 1.5),
+  earthquakeDays: Math.min(10, Math.max(1, Number(process.env.EARTHQUAKE_DAYS || 7))),
   interval: Math.max(1, Number(process.env.CHECK_INTERVAL_MINUTES || 15)),
   port: Number(process.env.PORT || 3000)
 };
@@ -258,6 +260,65 @@ function json(res, status, body) {
   res.end(JSON.stringify(body));
 }
 
+async function checkEarthquakes() {
+  const ignUrl = "https://www.ign.es/web/ultimos-terremotos/-/ultimos-terremotos/get10dias";
+  const response = await fetch(ignUrl, { headers: { "user-agent": "FIRMS-Watch/1.0" } });
+  if (!response.ok) throw new Error("IGN respondió HTTP " + response.status);
+  const html = await response.text();
+  const cells = [...html.matchAll(/<td[^>]*>([\s\S]*?)<\/td>/gi)].map(match =>
+    match[1]
+      .replace(/<[^>]+>/g, " ")
+      .replace(/&nbsp;|&#160;/gi, " ")
+      .replace(/&amp;/gi, "&")
+      .replace(/&quot;/gi, '"')
+      .replace(/&#39;|&apos;/gi, "'")
+      .replace(/&lt;/gi, "<")
+      .replace(/&gt;/gi, ">")
+      .replace(/\s+/g, " ")
+      .trim()
+  );
+  const cutoff = Date.now() - config.earthquakeDays * 24 * 60 * 60 * 1000;
+  const parsed = [];
+  for (let i = 0; i <= cells.length - 11; i++) {
+    if (!/^es\d{4}[a-z]+$/i.test(cells[i])) continue;
+    const [day, month, year] = cells[i + 1].split("/");
+    const timestamp = Date.parse(`${year}-${month}-${day}T${cells[i + 2]}Z`);
+    const latitude = Number(cells[i + 4]);
+    const longitude = Number(cells[i + 5]);
+    const depth = Number(cells[i + 6]);
+    const magnitude = Number(cells[i + 7]);
+    if (![timestamp, latitude, longitude, depth, magnitude].every(Number.isFinite)) continue;
+    parsed.push({
+      id: cells[i],
+      latitude,
+      longitude,
+      depth,
+      magnitude,
+      place: cells[i + 10] || "Ubicación sin especificar",
+      time: new Date(timestamp).toISOString(),
+      status: "reviewed",
+      tsunami: false,
+      url: "https://www.ign.es/web/ultimos-terremotos/-/ultimos-terremotos/getDetails?evid=" + encodeURIComponent(cells[i]),
+      distance: distanceKm(config.lat, config.lon, latitude, longitude)
+    });
+    i += 11;
+  }
+  const earthquakes = [...new Map(parsed.map(earthquake => [earthquake.id, earthquake])).values()]
+    .filter(earthquake => earthquake.magnitude >= config.earthquakeMinMagnitude && Date.parse(earthquake.time) >= cutoff)
+    .sort((a, b) => new Date(b.time) - new Date(a.time));
+
+  return {
+    earthquakes,
+    totalNearby: earthquakes.length,
+    location: { lat: config.lat, lon: config.lon },
+    coverage: "España",
+    source: "IGN",
+    minMagnitude: config.earthquakeMinMagnitude,
+    days: config.earthquakeDays,
+    checkedAt: new Date().toISOString()
+  };
+}
+
 const server = http.createServer(async (req, res) => {
   try {
     const allowedOrigins = new Set(["http://127.0.0.1:5500", "http://localhost:5500"]);
@@ -302,6 +363,9 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === "POST" && req.url === "/api/fires/check") {
       return json(res, 200, { ok: true, ...(await checkFires({ notify: false })) });
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/earthquakes") {
+      return json(res, 200, { ok: true, ...(await checkEarthquakes()) });
     }
     if (req.method === "GET" && (req.url === "/" || req.url === "/dashboard.html")) {
       res.writeHead(200, { "content-type": "text/html; charset=utf-8" });
