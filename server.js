@@ -405,6 +405,10 @@ const server = http.createServer(async (req, res) => {
     if (req.method === "GET" && requestUrl.pathname === "/api/earthquakes") {
       return json(res, 200, { ok: true, ...(await checkEarthquakes()) });
     }
+    if (requestUrl.pathname === "/health") {
+      res.writeHead(200, { "content-type": "text/plain" });
+      return res.end("OK");
+    }
     if (req.method === "GET" && requestUrl.pathname === "/") {
       res.writeHead(302, { "location": "/dashboard.html", "cache-control": "no-store" });
       return res.end();
